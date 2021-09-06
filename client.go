@@ -5,6 +5,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const maxResponseSize = 4110 // https://wiki.vg/Rcon#Fragmentation
@@ -19,16 +20,25 @@ type Client struct {
 	conn   net.Conn
 	lastID int32
 	lock   sync.Mutex
+
+	timeout time.Duration
 }
 
 // NewClient creates a TCP connection to a Minecraft server.
 func NewClient(hostport string) (*Client, error) {
-	conn, err := net.Dial("tcp", hostport)
+	conn, err := net.DialTimeout("tcp", hostport, 1*time.Second)
 	if err != nil {
 		return nil, err
 	}
-
 	return &Client{conn: conn}, nil
+}
+
+func NewClientTimeout(hostport string, timeout time.Duration) (*Client, error) {
+	conn, err := net.DialTimeout("tcp", hostport, timeout)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{conn: conn, timeout: timeout}, nil
 }
 
 // Close disconnects from the server.
@@ -67,16 +77,10 @@ func (c *Client) sendMessage(msgType MessageType, msg string) (Message, error) {
 		return Message{}, err
 	}
 
-	c.lock.Lock()
-	if _, err := c.conn.Write(encoded); err != nil {
+	respBytes, err := c.sendEncodedMessage(encoded)
+	if err != nil {
 		return Message{}, err
 	}
-
-	respBytes := make([]byte, maxResponseSize)
-	if _, err := c.conn.Read(respBytes); err != nil {
-		return Message{}, err
-	}
-	c.lock.Unlock()
 
 	resp, err := DecodeMessage(respBytes)
 	if err != nil {
@@ -88,4 +92,23 @@ func (c *Client) sendMessage(msgType MessageType, msg string) (Message, error) {
 	}
 
 	return resp, nil
+}
+
+func (c *Client) sendEncodedMessage(encoded []byte) ([]byte, error) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	c.conn.SetWriteDeadline(time.Now().Add(c.timeout))
+	if _, err := c.conn.Write(encoded); err != nil {
+		return nil, err
+	}
+
+	respBytes := make([]byte, maxResponseSize)
+	c.conn.SetReadDeadline(time.Now().Add(c.timeout))
+	read, err := c.conn.Read(respBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return respBytes[:read], nil
 }
