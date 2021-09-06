@@ -6,6 +6,15 @@
 
 A client for the Minecraft RCON protocol.
 
+## Fork Details
+
+This library was forked for improvements needed to work with our projects.
+
+Changes:
+
+- Fixed potential deadlocks on connection errors.
+- Added `NewClientTimeout` to prevent permanent blocking on reconnects.
+
 ## Library Usage
 
 ```go
